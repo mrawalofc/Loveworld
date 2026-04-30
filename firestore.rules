@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connectivity Test
+    match /test/connection {
+      allow get: if true;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Helper for chat messages
+    function isValidMessage(data) {
+      return data.keys().hasAll(['text', 'senderId', 'senderName', 'timestamp', 'senderPhoto']) &&
+             data.keys().size() == 5 &&
+             data.text is string && data.text.size() <= 1000 &&
+             data.senderId is string && data.senderId == request.auth.uid &&
+             data.senderName is string && data.senderName.size() <= 50 &&
+             (data.senderPhoto == null || (data.senderPhoto is string && data.senderPhoto.size() <= 2000)) &&
+             data.timestamp == request.time;
+    }
+
+    match /chat_messages/{messageId} {
+      allow list: if isSignedIn();
+      allow get: if isSignedIn();
+      allow create: if isSignedIn() && isValidMessage(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+    }
+
+    // Helper for typing status
+    function isValidTypingStatus(data) {
+      return data.keys().hasAll(['isTyping', 'userName', 'lastUpdated']) &&
+             (data.keys().size() == 3) &&
+             data.isTyping is bool &&
+             data.userName is string && data.userName.size() <= 50 &&
+             data.lastUpdated == request.time;
+    }
+
+    match /typing_status/{userId} {
+      allow read, list: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId && isValidTypingStatus(request.resource.data);
+    }
+  }
+}
